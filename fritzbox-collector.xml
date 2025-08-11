@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<Container>
+  <Name>FritzBox Collector</Name>
+  <Repository>deinrepo/fritzbox-collector:latest</Repository>
+  <Registry>docker.io</Registry>
+  <Network>host</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/deinrepo/fritzbox-collector</Support>
+  <Overview>
+    <Description>Abfrage und Logging von FritzBox- und DECT-Daten in MariaDB mit optionalem Speedtest. Ideal für Unraid und Grafana.</Description>
+  </Overview>
+  <Category>Smart Home:Monitoring:Internet</Category>
+  <Environment>
+    <Variable>
+      <Name>FRITZBOX_HOST</Name>
+      <Value>192.168.178.1</Value>
+      <Description>IP-Adresse der FritzBox</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>FRITZBOX_USER</Name>
+      <Value>deinuser</Value>
+      <Description>FritzBox Benutzername</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>FRITZBOX_PASSWORD</Name>
+      <Value>deinpasswort</Value>
+      <Description>FritzBox Passwort</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>DECT_AINS</Name>
+      <Value>12345,67890</Value>
+      <Description>Kommagetrennte DECT AINs (IDs deiner Steckdosen)</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>SQL_HOST</Name>
+      <Value>192.168.178.XX</Value>
+      <Description>IP deiner MariaDB</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>SQL_USER</Name>
+      <Value>mariauser</Value>
+      <Description>MariaDB User</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>SQL_PASSWORD</Name>
+      <Value>mariapass</Value>
+      <Description>MariaDB Passwort</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>SQL_DB</Name>
+      <Value>fritzbox</Value>
+      <Description>MariaDB Datenbankname</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>COLLECT_INTERVAL</Name>
+      <Value>300</Value>
+      <Description>Abfrage-Intervall FritzBox/DECT (in Sekunden)</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>SPEEDTEST_INTERVAL</Name>
+      <Value>3600</Value>
+      <Description>Speedtest-Intervall (in Sekunden)</Description>
+      <Type>text</Type>
+    </Variable>
+    <Variable>
+      <Name>LOG_FILE</Name>
+      <Value>/config/fritzbox_collector.log</Value>
+      <Description>Pfad zur Logdatei im Container</Description>
+      <Type>text</Type>
+    </Variable>
+  </Environment>
+  <Volume>
+    <Volume>
+      <HostDir>/mnt/user/appdata/fritzbox_collector/</HostDir>
+      <ContainerDir>/config</ContainerDir>
+      <AccessMode>rw</AccessMode>
+      <Description>Log- und Konfigurationsdateien</Description>
+    </Volume>
+  </Volume>
+  <WebUI/>
+  <Icon>https://avm.de/fileadmin/images/favicon.ico</Icon>
+</Container>

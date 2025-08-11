@@ -1,0 +1,4 @@
+fritzconnection
+mysql-connector-python
+speedtest-cli
+requests
