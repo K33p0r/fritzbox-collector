@@ -73,14 +73,21 @@ def get_fritz_data():
     fc = FritzConnection(address=FRITZBOX_HOST, user=FRITZBOX_USER, password=FRITZBOX_PASSWORD)
     data = {}
     try:
-        data['online'] = fc.call_action('WANPPPConnection', 'GetStatus')['NewConnectionStatus']
-        data['external_ip'] = fc.call_action('WANPPPConnection', 'GetExternalIPAddress')['NewExternalIPAddress']
-        logger.info(f"Online-Status: {data['online']}, Externe IP: {data['external_ip']}")
+        # Versuche zuerst WANIPConnection für Cable Router
+        data['online'] = fc.call_action('WANIPConnection', 'GetStatusInfo')['NewConnectionStatus']
+        data['external_ip'] = fc.call_action('WANIPConnection', 'GetExternalIPAddress')['NewExternalIPAddress']
+        logger.info(f"Online-Status (Cable): {data['online']}, Externe IP: {data['external_ip']}")
     except Exception as e:
-        logger.error(f"Fehler beim Abfragen FritzBox-Status: {e}")
-        notify_all(f"Fehler beim Abfragen FritzBox-Status: {e}")
-        data['online'] = None
-        data['external_ip'] = None
+        try:
+            # Fallback auf WANPPPConnection für DSL Router
+            data['online'] = fc.call_action('WANPPPConnection', 'GetStatus')['NewConnectionStatus']
+            data['external_ip'] = fc.call_action('WANPPPConnection', 'GetExternalIPAddress')['NewExternalIPAddress']
+            logger.info(f"Online-Status (DSL): {data['online']}, Externe IP: {data['external_ip']}")
+        except Exception as e2:
+            logger.error(f"Fehler beim Abfragen FritzBox-Status (beide Methoden): Cable: {e}, DSL: {e2}")
+            notify_all(f"Fehler beim Abfragen FritzBox-Status: {e2}")
+            data['online'] = None
+            data['external_ip'] = None
     try:
         data['active_devices'] = fc.call_action('Hosts', 'GetHostNumberOfEntries')['NewHostNumberOfEntries']
         logger.info(f"Aktive Geräte: {data['active_devices']}")
