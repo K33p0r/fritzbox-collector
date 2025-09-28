@@ -1,18 +1,26 @@
 import time
 import os
+import re
 import logging
 from fritzconnection import FritzConnection
 import mysql.connector
 import speedtest
 from notify import notify_all
 
+# Optional: spezifische Exceptions, falls verfügbar
+try:
+    from fritzconnection.core.exceptions import FritzArrayIndexError
+except Exception:  # Fallback, wenn Import nicht möglich
+    class FritzArrayIndexError(Exception):
+        pass
+
 LOG_FILE = os.getenv("LOG_FILE", "/config/fritzbox_collector.log")
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
+    format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE, mode='a')
+        logging.FileHandler(LOG_FILE, mode="a")
     ]
 )
 logger = logging.getLogger(__name__)
@@ -20,14 +28,17 @@ logger = logging.getLogger(__name__)
 FRITZBOX_HOST = os.getenv("FRITZBOX_HOST", "192.168.178.1")
 FRITZBOX_USER = os.getenv("FRITZBOX_USER", "deinuser")
 FRITZBOX_PASSWORD = os.getenv("FRITZBOX_PASSWORD", "deinpasswort")
-DECT_AINS = os.getenv("DECT_AINS", "12345,67890").split(',')
+
+# Optionaler Filter: Wenn leer -> ALLE Geräte speichern
+_DECT_AINS_RAW = os.getenv("DECT_AINS", "").strip()
+DECT_AINS_FILTER = [a.strip() for a in _DECT_AINS_RAW.split(",") if a.strip()]
 
 SQL_CONFIG = {
-    'user': os.getenv("SQL_USER", "sqluser"),
-    'password': os.getenv("SQL_PASSWORD", "sqlpass"),
-    'host': os.getenv("SQL_HOST", "sqlhost"),
-    'database': os.getenv("SQL_DB", "sqldb"),
-    'autocommit': True
+    "user": os.getenv("SQL_USER", "sqluser"),
+    "password": os.getenv("SQL_PASSWORD", "sqlpass"),
+    "host": os.getenv("SQL_HOST", "sqlhost"),
+    "database": os.getenv("SQL_DB", "sqldb"),
+    "autocommit": True
 }
 
 def create_tables():
@@ -46,6 +57,14 @@ def create_tables():
             state INT,
             power INT,
             temperature INT,
+            product_name VARCHAR(128),
+            device_name VARCHAR(128),
+            multimeter_power INT,
+            temperature_celsius INT,
+            switch_state VARCHAR(16),
+            hkr_is_temperature INT,
+            hkr_set_ventil_status VARCHAR(16),
+            hkr_set_temperature INT,
             time DATETIME
         )""",
         """CREATE TABLE IF NOT EXISTS speedtest_results (
@@ -68,104 +87,193 @@ def create_tables():
         logger.error(f"Fehler bei Tabellenprüfung/-erstellung: {e}")
         notify_all(f"SQL Tabellen konnten nicht angelegt werden: {e}")
 
-def _resolve_homeauto_service(fc: FritzConnection) -> tuple[str, set]:
-    """Ermittle den konkreten Homeauto-Service-Namen und gebe die verfügbaren Actions zurück."""
+    # Nachträglich fehlende Spalten ergänzen (Migration)
     try:
-        services = list(fc.services.values())
-        candidates = [s for s in services if s.service.startswith("X_AVM-DE_Homeauto")]
-        if not candidates:
-            logger.error("Kein X_AVM-DE_Homeauto Service gefunden.")
-            return "", set()
-        # Bevorzuge explizit die Version 1, falls vorhanden
-        svc = next((s for s in candidates if s.service.startswith("X_AVM-DE_Homeauto1")), candidates[0])
-        actions = set(svc.actions.keys())
-        logger.info(f"Nutze Homeauto-Service: {svc.service} mit Actions: {sorted(actions)}")
-        return svc.service, actions
+        ensure_columns()
     except Exception as e:
-        logger.error(f"Konnte Homeauto-Service nicht auflösen: {e}")
-        return "", set()
+        logger.error(f"Fehler beim Ergänzen fehlender Spalten: {e}")
+        notify_all(f"SQL Spalten konnten nicht ergänzt werden: {e}")
 
-def _read_dect_via_homeauto(fc: FritzConnection, service_name: str, available_actions: set, ain: str) -> dict:
-    """Lese DECT-Werte robust: zuerst gezielte Actions, bei 401/Unbekannt -> GetSpecificDeviceInfos-Fallback."""
-    ain = ain.strip()
-    # 1) bevorzugte, gezielte Actions (wenn vorhanden)
-    try:
-        if {"GetSwitchState", "GetTemperature"}.issubset(available_actions):
-            state = fc.call_action(service_name, "GetSwitchState", NewAIN=ain)["NewSwitchState"]
-            temp = fc.call_action(service_name, "GetTemperature", NewAIN=ain)["NewTemperature"]
-        else:
-            raise RuntimeError("Gezielte State/Temp-Actions nicht verfügbar")
-        # Power: je nach Firmware GetSwitchPower oder GetPower
-        power = None
-        if "GetSwitchPower" in available_actions:
-            power = fc.call_action(service_name, "GetSwitchPower", NewAIN=ain).get("NewSwitchPower")
-        elif "GetPower" in available_actions:
-            power = fc.call_action(service_name, "GetPower", NewAIN=ain).get("NewPower")
-        else:
-            logger.warning("Weder GetSwitchPower noch GetPower verfügbar – nutze Fallback.")
-            raise RuntimeError("Power-Actions nicht verfügbar")
-        return {"ain": ain, "state": state, "power": power, "temperature": temp}
-    except Exception as e:
-        logger.warning(f"Abruf über gezielte Actions fehlgeschlagen ({ain}): {e} – versuche GetSpecificDeviceInfos")
+def ensure_columns():
+    # Prüfe vorhandene Spalten und ergänze ggf. via ALTER TABLE
+    needed = {
+        "product_name": "VARCHAR(128)",
+        "device_name": "VARCHAR(128)",
+        "multimeter_power": "INT",
+        "temperature_celsius": "INT",
+        "switch_state": "VARCHAR(16)",
+        "hkr_is_temperature": "INT",
+        "hkr_set_ventil_status": "VARCHAR(16)",
+        "hkr_set_temperature": "INT"
+    }
+    conn = mysql.connector.connect(**SQL_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COLUMN_NAME
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'dect200_data'
+    """, (SQL_CONFIG["database"],))
+    existing = {row[0] for row in cursor.fetchall()}
+    for col, coltype in needed.items():
+        if col not in existing:
+            alter = f"ALTER TABLE dect200_data ADD COLUMN {col} {coltype} NULL"
+            cursor.execute(alter)
+            logger.info(f"Spalte ergänzt: {col} {coltype}")
+    cursor.close()
+    conn.close()
 
-    # 2) Fallback: GetSpecificDeviceInfos (sehr kompatibel)
+def _resolve_homeauto_service(fc: FritzConnection) -> str | None:
+    """Service-Namen ermitteln, z. B. 'X_AVM-DE_Homeauto1'."""
     try:
-        info = fc.call_action(service_name, "GetSpecificDeviceInfos", NewAIN=ain)
-        state = info.get("NewSwitchState")
-        power = info.get("NewPower") or info.get("NewSwitchPower")
-        temp = info.get("NewTemperature")
-        if state is None and power is None and temp is None:
-            raise RuntimeError(f"Unerwartete Antwort von GetSpecificDeviceInfos: {info}")
-        return {"ain": ain, "state": state, "power": power, "temperature": temp}
+        for name in fc.services.keys():
+            if name.startswith("X_AVM-DE_Homeauto"):
+                return name
     except Exception as e:
-        logger.error(f"Fallback GetSpecificDeviceInfos fehlgeschlagen ({ain}): {e}")
-        return {"ain": ain, "state": None, "power": None, "temperature": None}
+        logger.error(f"Homeauto-Service konnte nicht ermittelt werden: {e}")
+    return None
+
+def _is_index_out_of_range_error(err: Exception) -> bool:
+    rep = repr(err)
+    return ("SpecifiedArrayIndexInvalid" in rep) or ("errorCode: 713" in rep) or isinstance(err, FritzArrayIndexError)
+
+def _enumerate_homeauto_devices(fc: FritzConnection, service_name: str, max_iter: int = 256) -> list[dict]:
+    """Liest Geräte über GetGenericDeviceInfos per Index 0..n, bis 713 kommt."""
+    devices = []
+    for i in range(max_iter):
+        try:
+            info = fc.call_action(service_name, "GetGenericDeviceInfos", NewIndex=i)
+            devices.append(info)
+        except Exception as e:
+            if _is_index_out_of_range_error(e):
+                logger.info(f"Geräte-Auflistung beendet bei Index {i} (713).")
+                break
+            logger.error(f"GetGenericDeviceInfos Fehler bei Index {i}: {e}")
+            notify_all(f"Fehler bei GetGenericDeviceInfos Index {i}: {e}")
+            break
+    return devices
+
+def _compact_ain(ain: str) -> str:
+    return re.sub(r"\s+", "", ain or "").strip()
+
+def _normalize_device_info(info: dict) -> dict:
+    """Extrahiert und normalisiert AIN, Zustand, Leistung, Temperatur und weitere Felder."""
+    raw_ain = info.get("NewAIN") or ""
+    ain = _compact_ain(raw_ain)
+    if not ain:
+        # Ungültiger Datensatz (z. B. 'unknown' Gerät ohne AIN)
+        return {
+            "ain": None,
+            "state": None,
+            "power": None,
+            "temperature": None,
+            "product_name": None,
+            "device_name": None,
+            "multimeter_power": None,
+            "temperature_celsius": None,
+            "switch_state": None,
+            "hkr_is_temperature": None,
+            "hkr_set_ventil_status": None,
+            "hkr_set_temperature": None
+        }
+
+    switch_state_str = str(info.get("NewSwitchState") or "").upper()  # OFF/ON/...
+    state_map = {"ON": 1, "OFF": 0}
+    state = state_map.get(switch_state_str, None)
+
+    multimeter_power = info.get("NewMultimeterPower")
+    temperature_celsius = info.get("NewTemperatureCelsius")
+
+    # Integer-Wandlungen mit Fail-Safe
+    try:
+        multimeter_power = int(multimeter_power) if multimeter_power is not None else None
+    except Exception:
+        multimeter_power = None
+    try:
+        temperature_celsius = int(temperature_celsius) if temperature_celsius is not None else None
+    except Exception:
+        temperature_celsius = None
+
+    # Für Abwärtskompatibilität auch alte Spalten befüllen
+    power = multimeter_power
+    temperature = temperature_celsius
+
+    return {
+        "ain": ain,
+        "state": state,  # 0/1/NULL
+        "power": power,  # alias zu multimeter_power (mW)
+        "temperature": temperature,  # alias zu temperature_celsius (0.1 °C)
+        "product_name": info.get("NewProductName"),
+        "device_name": info.get("NewDeviceName"),
+        "multimeter_power": multimeter_power,
+        "temperature_celsius": temperature_celsius,
+        "switch_state": info.get("NewSwitchState"),
+        "hkr_is_temperature": info.get("NewHkrIsTemperature"),
+        "hkr_set_ventil_status": info.get("NewHkrSetVentilStatus"),
+        "hkr_set_temperature": info.get("NewHkrSetTemperature"),
+    }
 
 def get_fritz_data():
     logger.info("Frage FritzBox-Daten ab...")
     fc = FritzConnection(address=FRITZBOX_HOST, user=FRITZBOX_USER, password=FRITZBOX_PASSWORD)
     data = {}
+
+    # Online-/IP-Infos
     try:
-        # Versuche zuerst WANIPConnection für Cable Router
-        data['online'] = fc.call_action('WANIPConnection', 'GetStatusInfo')['NewConnectionStatus']
-        data['external_ip'] = fc.call_action('WANIPConnection', 'GetExternalIPAddress')['NewExternalIPAddress']
+        data["online"] = fc.call_action("WANIPConnection", "GetStatusInfo")["NewConnectionStatus"]
+        data["external_ip"] = fc.call_action("WANIPConnection", "GetExternalIPAddress")["NewExternalIPAddress"]
         logger.info(f"Online-Status (Cable): {data['online']}, Externe IP: {data['external_ip']}")
     except Exception as e:
         try:
-            # Fallback auf WANPPPConnection für DSL Router
-            data['online'] = fc.call_action('WANPPPConnection', 'GetStatus')['NewConnectionStatus']
-            data['external_ip'] = fc.call_action('WANPPPConnection', 'GetExternalIPAddress')['NewExternalIPAddress']
+            data["online"] = fc.call_action("WANPPPConnection", "GetStatus")["NewConnectionStatus"]
+            data["external_ip"] = fc.call_action("WANPPPConnection", "GetExternalIPAddress")["NewExternalIPAddress"]
             logger.info(f"Online-Status (DSL): {data['online']}, Externe IP: {data['external_ip']}")
         except Exception as e2:
             logger.error(f"Fehler beim Abfragen FritzBox-Status (beide Methoden): Cable: {e}, DSL: {e2}")
             notify_all(f"Fehler beim Abfragen FritzBox-Status: {e2}")
-            data['online'] = None
-            data['external_ip'] = None
+            data["online"] = None
+            data["external_ip"] = None
+
+    # Aktive Geräte (LAN/WLAN)
     try:
-        data['active_devices'] = fc.call_action('Hosts', 'GetHostNumberOfEntries')['NewHostNumberOfEntries']
+        data["active_devices"] = fc.call_action("Hosts", "GetHostNumberOfEntries")["NewHostNumberOfEntries"]
         logger.info(f"Aktive Geräte: {data['active_devices']}")
     except Exception as e:
         logger.error(f"Fehler beim Abfragen der Geräteanzahl: {e}")
         notify_all(f"Fehler beim Abfragen Geräteanzahl: {e}")
-        data['active_devices'] = None
+        data["active_devices"] = None
 
-    # Homeauto-Service auflösen und DECT lesen
-    data['dect'] = []
-    service_name, actions = _resolve_homeauto_service(fc)
+    # Smart-Home über Homeauto-TR-064
+    data["dect"] = []
+    service_name = _resolve_homeauto_service(fc)
     if not service_name:
-        logger.error("Kein Homeauto-Service gefunden – DECT-Daten werden mit None befüllt.")
-        for ain in DECT_AINS:
-            data['dect'].append({'ain': ain.strip(), 'state': None, 'power': None, 'temperature': None})
+        logger.error("Kein X_AVM-DE_Homeauto Service gefunden – DECT-Daten werden leer gesetzt.")
         return data
 
-    for ain in DECT_AINS:
-        device = _read_dect_via_homeauto(fc, service_name, actions, ain)
-        if device['state'] is None and device['power'] is None and device['temperature'] is None:
-            notify_all(f"Fehler beim Abfragen DECT {ain} – siehe Log (Action-Mapping/Firmware)")
-            logger.error(f"Fehler beim Abfragen DECT {ain}")
-        else:
-            logger.info(f"DECT {ain}: State={device['state']}, Power={device['power']}, Temp={device['temperature']}")
-        data['dect'].append(device)
+    raw_devices = _enumerate_homeauto_devices(fc, service_name)
+
+    # Normalisieren und optional filtern
+    normalized = []
+    for info in raw_devices:
+        dev = _normalize_device_info(info)
+        if not dev["ain"]:
+            continue
+        if DECT_AINS_FILTER:
+            ain_compact = dev["ain"].replace(" ", "")
+            if not any(ain_compact == target.replace(" ", "") for target in DECT_AINS_FILTER):
+                continue
+        normalized.append(dev)
+
+    # Logging
+    for d in normalized:
+        logger.info(
+            f"DECT {d['ain']}: "
+            f"State={d['state']}({d['switch_state']}), "
+            f"Power(mW)={d['multimeter_power']}, "
+            f"Temp(0.1C)={d['temperature_celsius']}, "
+            f"Prod='{d['product_name']}', Name='{d['device_name']}'"
+        )
+
+    data["dect"] = normalized
     return data
 
 def write_to_sql(data):
@@ -174,15 +282,38 @@ def write_to_sql(data):
         try:
             conn = mysql.connector.connect(**SQL_CONFIG)
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO fritzbox_status (online, external_ip, active_devices, time)
                 VALUES (%s, %s, %s, NOW())
-            """, (data['online'], data['external_ip'], data['active_devices']))
-            for device in data['dect']:
-                cursor.execute("""
-                    INSERT INTO dect200_data (ain, state, power, temperature, time)
-                    VALUES (%s, %s, %s, %s, NOW())
-                """, (device['ain'], device['state'], device['power'], device['temperature']))
+                """,
+                (data.get("online"), data.get("external_ip"), data.get("active_devices"))
+            )
+            for device in data.get("dect", []):
+                cursor.execute(
+                    """
+                    INSERT INTO dect200_data (
+                        ain, state, power, temperature,
+                        product_name, device_name, multimeter_power, temperature_celsius,
+                        switch_state, hkr_is_temperature, hkr_set_ventil_status, hkr_set_temperature, time
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """,
+                    (
+                        device["ain"],
+                        device["state"],
+                        device["power"],
+                        device["temperature"],
+                        device["product_name"],
+                        device["device_name"],
+                        device["multimeter_power"],
+                        device["temperature_celsius"],
+                        device["switch_state"],
+                        device["hkr_is_temperature"],
+                        device["hkr_set_ventil_status"],
+                        device["hkr_set_temperature"],
+                    )
+                )
             cursor.close()
             conn.close()
             logger.info("FritzBox- und DECT-Daten erfolgreich gespeichert.")
@@ -203,7 +334,7 @@ def run_speedtest():
             upload = st.upload() / 1_000_000
             ping = st.results.ping
             logger.info(f"Speedtest: Ping={ping} ms, Download={download:.2f} Mbps, Upload={upload:.2f} Mbps")
-            return {'ping_ms': ping, 'download_mbps': download, 'upload_mbps': upload}
+            return {"ping_ms": ping, "download_mbps": download, "upload_mbps": upload}
         except Exception as e:
             logger.error(f"Speedtest Fehler (Versuch {attempt+1}): {e}")
             notify_all(f"Fehler beim Speedtest: {e}")
@@ -217,10 +348,13 @@ def write_speedtest_to_sql(result):
             try:
                 conn = mysql.connector.connect(**SQL_CONFIG)
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO speedtest_results (ping_ms, download_mbps, upload_mbps, time)
                     VALUES (%s, %s, %s, NOW())
-                """, (result['ping_ms'], result['download_mbps'], result['upload_mbps']))
+                    """,
+                    (result["ping_ms"], result["download_mbps"], result["upload_mbps"])
+                )
                 cursor.close()
                 conn.close()
                 logger.info("Speedtest-Daten erfolgreich gespeichert.")
