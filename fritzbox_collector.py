@@ -68,6 +68,59 @@ def create_tables():
         logger.error(f"Fehler bei Tabellenprüfung/-erstellung: {e}")
         notify_all(f"SQL Tabellen konnten nicht angelegt werden: {e}")
 
+def _resolve_homeauto_service(fc: FritzConnection) -> tuple[str, set]:
+    """Ermittle den konkreten Homeauto-Service-Namen und gebe die verfügbaren Actions zurück."""
+    try:
+        services = list(fc.services.values())
+        candidates = [s for s in services if s.service.startswith("X_AVM-DE_Homeauto")]
+        if not candidates:
+            logger.error("Kein X_AVM-DE_Homeauto Service gefunden.")
+            return "", set()
+        # Bevorzuge explizit die Version 1, falls vorhanden
+        svc = next((s for s in candidates if s.service.startswith("X_AVM-DE_Homeauto1")), candidates[0])
+        actions = set(svc.actions.keys())
+        logger.info(f"Nutze Homeauto-Service: {svc.service} mit Actions: {sorted(actions)}")
+        return svc.service, actions
+    except Exception as e:
+        logger.error(f"Konnte Homeauto-Service nicht auflösen: {e}")
+        return "", set()
+
+def _read_dect_via_homeauto(fc: FritzConnection, service_name: str, available_actions: set, ain: str) -> dict:
+    """Lese DECT-Werte robust: zuerst gezielte Actions, bei 401/Unbekannt -> GetSpecificDeviceInfos-Fallback."""
+    ain = ain.strip()
+    # 1) bevorzugte, gezielte Actions (wenn vorhanden)
+    try:
+        if {"GetSwitchState", "GetTemperature"}.issubset(available_actions):
+            state = fc.call_action(service_name, "GetSwitchState", NewAIN=ain)["NewSwitchState"]
+            temp = fc.call_action(service_name, "GetTemperature", NewAIN=ain)["NewTemperature"]
+        else:
+            raise RuntimeError("Gezielte State/Temp-Actions nicht verfügbar")
+        # Power: je nach Firmware GetSwitchPower oder GetPower
+        power = None
+        if "GetSwitchPower" in available_actions:
+            power = fc.call_action(service_name, "GetSwitchPower", NewAIN=ain).get("NewSwitchPower")
+        elif "GetPower" in available_actions:
+            power = fc.call_action(service_name, "GetPower", NewAIN=ain).get("NewPower")
+        else:
+            logger.warning("Weder GetSwitchPower noch GetPower verfügbar – nutze Fallback.")
+            raise RuntimeError("Power-Actions nicht verfügbar")
+        return {"ain": ain, "state": state, "power": power, "temperature": temp}
+    except Exception as e:
+        logger.warning(f"Abruf über gezielte Actions fehlgeschlagen ({ain}): {e} – versuche GetSpecificDeviceInfos")
+
+    # 2) Fallback: GetSpecificDeviceInfos (sehr kompatibel)
+    try:
+        info = fc.call_action(service_name, "GetSpecificDeviceInfos", NewAIN=ain)
+        state = info.get("NewSwitchState")
+        power = info.get("NewPower") or info.get("NewSwitchPower")
+        temp = info.get("NewTemperature")
+        if state is None and power is None and temp is None:
+            raise RuntimeError(f"Unerwartete Antwort von GetSpecificDeviceInfos: {info}")
+        return {"ain": ain, "state": state, "power": power, "temperature": temp}
+    except Exception as e:
+        logger.error(f"Fallback GetSpecificDeviceInfos fehlgeschlagen ({ain}): {e}")
+        return {"ain": ain, "state": None, "power": None, "temperature": None}
+
 def get_fritz_data():
     logger.info("Frage FritzBox-Daten ab...")
     fc = FritzConnection(address=FRITZBOX_HOST, user=FRITZBOX_USER, password=FRITZBOX_PASSWORD)
@@ -95,18 +148,24 @@ def get_fritz_data():
         logger.error(f"Fehler beim Abfragen der Geräteanzahl: {e}")
         notify_all(f"Fehler beim Abfragen Geräteanzahl: {e}")
         data['active_devices'] = None
+
+    # Homeauto-Service auflösen und DECT lesen
     data['dect'] = []
+    service_name, actions = _resolve_homeauto_service(fc)
+    if not service_name:
+        logger.error("Kein Homeauto-Service gefunden – DECT-Daten werden mit None befüllt.")
+        for ain in DECT_AINS:
+            data['dect'].append({'ain': ain.strip(), 'state': None, 'power': None, 'temperature': None})
+        return data
+
     for ain in DECT_AINS:
-        try:
-            switch_state = fc.call_action('X_AVM-DE_Homeauto', 'GetSwitchState', NewAIN=ain.strip())['NewSwitchState']
-            power = fc.call_action('X_AVM-DE_Homeauto', 'GetSwitchPower', NewAIN=ain.strip())['NewSwitchPower']
-            temp = fc.call_action('X_AVM-DE_Homeauto', 'GetTemperature', NewAIN=ain.strip())['NewTemperature']
-            data['dect'].append({'ain': ain, 'state': switch_state, 'power': power, 'temperature': temp})
-            logger.info(f"DECT {ain}: State={switch_state}, Power={power}, Temp={temp}")
-        except Exception as e:
-            logger.error(f"Fehler beim Abfragen DECT {ain}: {e}")
-            notify_all(f"Fehler beim Abfragen DECT {ain}: {e}")
-            data['dect'].append({'ain': ain, 'state': None, 'power': None, 'temperature': None})
+        device = _read_dect_via_homeauto(fc, service_name, actions, ain)
+        if device['state'] is None and device['power'] is None and device['temperature'] is None:
+            notify_all(f"Fehler beim Abfragen DECT {ain} – siehe Log (Action-Mapping/Firmware)")
+            logger.error(f"Fehler beim Abfragen DECT {ain}")
+        else:
+            logger.info(f"DECT {ain}: State={device['state']}, Power={device['power']}, Temp={device['temperature']}")
+        data['dect'].append(device)
     return data
 
 def write_to_sql(data):
