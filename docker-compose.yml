@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # MariaDB Database
+  mariadb:
+    image: mariadb:latest
+    container_name: fritzbox-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: change_this_root_password
+      MYSQL_DATABASE: fritzbox
+      MYSQL_USER: collector
+      MYSQL_PASSWORD: change_this_password
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - fritzbox-net
+
+  # FritzBox Collector
+  fritzbox-collector:
+    build: .
+    container_name: fritzbox-collector
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+    environment:
+      # FritzBox Configuration
+      - FRITZBOX_HOST=192.168.178.1
+      - FRITZBOX_USER=your_fritzbox_username
+      - FRITZBOX_PASSWORD=your_fritzbox_password
+      - DECT_AINS=  # Leave empty to collect all DECT devices
+      
+      # Database Configuration
+      - SQL_HOST=mariadb
+      - SQL_USER=collector
+      - SQL_PASSWORD=change_this_password
+      - SQL_DB=fritzbox
+      
+      # Collection Intervals (in seconds)
+      - COLLECT_INTERVAL=300  # 5 minutes
+      - SPEEDTEST_INTERVAL=3600  # 1 hour
+      
+      # Tibber Configuration (Optional - uncomment to enable)
+      # Get your token from: https://developer.tibber.com/settings/access-token
+      #- TIBBER_TOKEN=your_tibber_personal_access_token
+      #- TIBBER_INTERVAL=3600  # 1 hour
+      
+      # Logging
+      - LOG_FILE=/config/fritzbox_collector.log
+      
+      # Notifications (Optional)
+      #- DISCORD_WEBHOOK=https://discord.com/api/webhooks/your_webhook_url
+      #- TELEGRAM_TOKEN=your_telegram_bot_token
+      #- TELEGRAM_CHATID=your_telegram_chat_id
+    volumes:
+      - ./config:/config
+    networks:
+      - fritzbox-net
+    healthcheck:
+      test: ["CMD", "python3", "healthcheck.py"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+
+  # Grafana (Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fritzbox-grafana
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=change_this_password
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - fritzbox-net
+
+volumes:
+  mariadb_data:
+  grafana_data:
+
+networks:
+  fritzbox-net:
+    driver: bridge

@@ -15,6 +15,22 @@ Dieses Projekt sammelt regelmäßig Statusdaten von deiner FritzBox und den DECT
 - Optional: Benachrichtigung bei Fehlern per Discord-Webhook und Telegram
 
 ## Start mit Docker (empfohlen in Unraid)
+
+### Option 1: Docker Compose (empfohlen für neue Setups)
+
+```bash
+# 1. Passe docker-compose.yml an (Passwörter, FritzBox-Daten, Tibber-Token)
+# 2. Starte alle Services
+docker-compose up -d
+
+# 3. Logs anschauen
+docker-compose logs -f fritzbox-collector
+
+# 4. Grafana öffnen: http://localhost:3000 (admin/change_this_password)
+```
+
+### Option 2: Docker Run
+
 ```bash
 docker build -t fritzbox-collector .
 docker run -d --restart=unless-stopped \
@@ -73,6 +89,24 @@ Das Skript legt die nötigen Tabellen automatisch an:
 ### Voraussetzungen
 1. Tibber Konto mit aktiviertem Pulse IR Gerät
 2. Personal Access Token von Tibber ([hier generieren](https://developer.tibber.com/settings/access-token))
+
+### Verbindung testen (Optional aber empfohlen)
+
+Bevor du den Container startest, kannst du deine Tibber-Konfiguration testen:
+
+```bash
+# Python-Abhängigkeiten installieren (falls noch nicht installiert)
+pip3 install gql[all] aiohttp
+
+# Test-Skript ausführen
+python3 test_tibber_connection.py YOUR_TIBBER_TOKEN
+```
+
+Das Skript zeigt dir:
+- ✅ Ob dein Token gültig ist
+- 📊 Deine Tibber-Kontoinformationen
+- 🏠 Alle verbundenen Homes
+- 📈 Ob historische Daten verfügbar sind
 
 ### Einrichtung
 1. Generiere einen Personal Access Token in deinem Tibber-Account
