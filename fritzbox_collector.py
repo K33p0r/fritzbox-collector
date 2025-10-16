@@ -6,6 +6,12 @@ from fritzconnection import FritzConnection
 import mysql.connector
 import speedtest
 from notify import notify_all
+from weather_collector import create_weather_table, collect_weather
+from electricity_price import (
+    create_electricity_price_table,
+    store_electricity_price,
+    ELECTRICITY_PRICE_EUR_PER_KWH
+)
 
 # Optional: spezifische Exceptions, falls verfügbar
 try:
@@ -93,6 +99,16 @@ def create_tables():
     except Exception as e:
         logger.error(f"Fehler beim Ergänzen fehlender Spalten: {e}")
         notify_all(f"SQL Spalten konnten nicht ergänzt werden: {e}")
+    
+    # Wetter- und Strompreis-Tabellen erstellen
+    try:
+        create_weather_table()
+        create_electricity_price_table()
+        store_electricity_price()
+        logger.info(f"Strompreis konfiguriert: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh")
+    except Exception as e:
+        logger.error(f"Fehler beim Erstellen zusätzlicher Tabellen: {e}")
+        notify_all(f"Zusätzliche Tabellen konnten nicht angelegt werden: {e}")
 
 def ensure_columns():
     # Prüfe vorhandene Spalten und ergänze ggf. via ALTER TABLE
@@ -368,9 +384,12 @@ def write_speedtest_to_sql(result):
 if __name__ == "__main__":
     interval = int(os.getenv("COLLECT_INTERVAL", "300"))
     speedtest_interval = int(os.getenv("SPEEDTEST_INTERVAL", "3600"))
+    weather_interval = int(os.getenv("WEATHER_INTERVAL", "3600"))  # Standard: stündlich
     last_speedtest = 0
+    last_weather = 0
     create_tables()
     logger.info("Starte FritzBox-Collector...")
+    logger.info(f"Strompreis: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh")
     while True:
         fritz_data = get_fritz_data()
         write_to_sql(fritz_data)
@@ -379,4 +398,7 @@ if __name__ == "__main__":
             speed_result = run_speedtest()
             write_speedtest_to_sql(speed_result)
             last_speedtest = now
+        if now - last_weather > weather_interval:
+            collect_weather()
+            last_weather = now
         time.sleep(interval)
