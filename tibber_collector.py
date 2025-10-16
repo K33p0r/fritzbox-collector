@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 # Tibber API Configuration
 TIBBER_API_URL = "https://api.tibber.com/v1-beta/gql"
 TIBBER_WS_URL = "wss://websocket-api.tibber.com/v1-beta/gql"
-TIBBER_TOKEN = os.getenv("TIBBER_TOKEN", "")
+
+
+def get_tibber_token():
+    """Get Tibber token from environment."""
+    return os.getenv("TIBBER_TOKEN", "")
 
 SQL_CONFIG = {
     "user": os.getenv("SQL_USER", "sqluser"),
@@ -91,13 +95,14 @@ def exponential_backoff_retry(func, max_retries=5, initial_delay=1, max_delay=60
 
 def get_tibber_client():
     """Create and return a Tibber GraphQL client."""
-    if not TIBBER_TOKEN:
+    tibber_token = get_tibber_token()
+    if not tibber_token:
         logger.error("TIBBER_TOKEN environment variable is not set")
         return None
     
     transport = AIOHTTPTransport(
         url=TIBBER_API_URL,
-        headers={"Authorization": f"Bearer {TIBBER_TOKEN}"}
+        headers={"Authorization": f"Bearer {tibber_token}"}
     )
     client = Client(transport=transport, fetch_schema_from_transport=True)
     return client
@@ -113,7 +118,8 @@ async def fetch_historical_consumption(hours=24):
     Returns:
         List of consumption data points
     """
-    if not TIBBER_TOKEN:
+    tibber_token = get_tibber_token()
+    if not tibber_token:
         logger.error("Cannot fetch Tibber data: TIBBER_TOKEN not set")
         return []
     
@@ -150,7 +156,7 @@ async def fetch_historical_consumption(hours=24):
     try:
         transport = AIOHTTPTransport(
             url=TIBBER_API_URL,
-            headers={"Authorization": f"Bearer {TIBBER_TOKEN}"}
+            headers={"Authorization": f"Bearer {tibber_token}"}
         )
         
         async with Client(
@@ -180,7 +186,8 @@ async def subscribe_to_live_measurements(callback):
     Args:
         callback: Function to call with each new measurement
     """
-    if not TIBBER_TOKEN:
+    tibber_token = get_tibber_token()
+    if not tibber_token:
         logger.error("Cannot subscribe to Tibber: TIBBER_TOKEN not set")
         return
     
@@ -215,7 +222,7 @@ async def subscribe_to_live_measurements(callback):
         try:
             transport = WebsocketsTransport(
                 url=TIBBER_WS_URL,
-                headers={"Authorization": f"Bearer {TIBBER_TOKEN}"}
+                headers={"Authorization": f"Bearer {tibber_token}"}
             )
             
             async with Client(

@@ -83,14 +83,15 @@ class TestTibberCollector(unittest.TestCase):
     
     def test_get_tibber_client_with_token(self):
         """Test getting Tibber client with valid token."""
-        client = tibber_collector.get_tibber_client()
-        self.assertIsNotNone(client)
+        with patch('tibber_collector.get_tibber_token', return_value="test_token_12345"):
+            client = tibber_collector.get_tibber_client()
+            self.assertIsNotNone(client)
     
     def test_get_tibber_client_without_token(self):
         """Test getting Tibber client without token."""
-        del os.environ["TIBBER_TOKEN"]
-        client = tibber_collector.get_tibber_client()
-        self.assertIsNone(client)
+        with patch('tibber_collector.get_tibber_token', return_value=""):
+            client = tibber_collector.get_tibber_client()
+            self.assertIsNone(client)
     
     @patch('tibber_collector.mysql.connector.connect')
     def test_write_tibber_data_to_sql(self, mock_connect):
@@ -198,15 +199,11 @@ class TestTibberCollector(unittest.TestCase):
     
     def test_sync_run_historical_collection(self):
         """Test synchronous wrapper for historical collection."""
-        with patch('tibber_collector.fetch_historical_consumption', new_callable=AsyncMock) as mock_fetch:
-            with patch('tibber_collector.write_historical_data_to_sql') as mock_write:
-                mock_fetch.return_value = []
-                
-                tibber_collector.sync_run_historical_collection()
-                
-                # Verify async function was called
-                mock_fetch.assert_called_once()
-                mock_write.assert_called_once()
+        with patch('tibber_collector.run_tibber_collector_once', new_callable=AsyncMock) as mock_run:
+            tibber_collector.sync_run_historical_collection()
+            
+            # Verify async function was called
+            mock_run.assert_called_once()
 
 
 class TestAsyncTibberFunctions(unittest.TestCase):
@@ -227,51 +224,50 @@ class TestAsyncTibberFunctions(unittest.TestCase):
     @patch('tibber_collector.Client')
     def test_fetch_historical_consumption(self, mock_client_class):
         """Test fetching historical consumption data."""
-        mock_session = MagicMock()
-        mock_client = MagicMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_client.__aexit__ = AsyncMock()
-        mock_client_class.return_value = mock_client
-        
-        mock_result = {
-            "viewer": {
-                "homes": [
-                    {
-                        "consumption": {
-                            "nodes": [
-                                {
-                                    "from": "2025-10-16T10:00:00Z",
-                                    "to": "2025-10-16T11:00:00Z",
-                                    "consumption": 1.5,
-                                    "cost": 0.45
-                                }
-                            ]
+        with patch('tibber_collector.get_tibber_token', return_value="test_token_12345"):
+            mock_session = MagicMock()
+            mock_client = MagicMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_client.__aexit__ = AsyncMock()
+            mock_client_class.return_value = mock_client
+            
+            mock_result = {
+                "viewer": {
+                    "homes": [
+                        {
+                            "consumption": {
+                                "nodes": [
+                                    {
+                                        "from": "2025-10-16T10:00:00Z",
+                                        "to": "2025-10-16T11:00:00Z",
+                                        "consumption": 1.5,
+                                        "cost": 0.45
+                                    }
+                                ]
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
             }
-        }
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        
-        result = self.loop.run_until_complete(
-            tibber_collector.fetch_historical_consumption(hours=24)
-        )
-        
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["consumption"], 1.5)
+            mock_session.execute = AsyncMock(return_value=mock_result)
+            
+            result = self.loop.run_until_complete(
+                tibber_collector.fetch_historical_consumption(hours=24)
+            )
+            
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["consumption"], 1.5)
     
     @patch('tibber_collector.Client')
     def test_fetch_historical_consumption_no_token(self, mock_client_class):
         """Test fetching data without token."""
-        del os.environ["TIBBER_TOKEN"]
-        tibber_collector.TIBBER_TOKEN = ""
-        
-        result = self.loop.run_until_complete(
-            tibber_collector.fetch_historical_consumption(hours=24)
-        )
-        
-        self.assertEqual(result, [])
-        mock_client_class.assert_not_called()
+        with patch('tibber_collector.get_tibber_token', return_value=""):
+            result = self.loop.run_until_complete(
+                tibber_collector.fetch_historical_consumption(hours=24)
+            )
+            
+            self.assertEqual(result, [])
+            mock_client_class.assert_not_called()
     
     @patch('tibber_collector.Client')
     def test_fetch_historical_consumption_error(self, mock_client_class):
