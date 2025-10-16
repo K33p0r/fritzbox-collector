@@ -22,3 +22,26 @@ CREATE TABLE speedtest_results (
     upload_mbps FLOAT,
     time DATETIME
 );
+
+CREATE TABLE weather_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    location VARCHAR(128),
+    temperature_celsius FLOAT,
+    feels_like_celsius FLOAT,
+    humidity INT,
+    pressure INT,
+    weather_condition VARCHAR(64),
+    weather_description VARCHAR(128),
+    wind_speed FLOAT,
+    clouds INT,
+    time DATETIME
+);
+
+CREATE TABLE electricity_price_config (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    price_eur_per_kwh FLOAT NOT NULL,
+    valid_from DATETIME NOT NULL,
+    valid_to DATETIME NULL,
+    description VARCHAR(255),
+    time DATETIME
+);

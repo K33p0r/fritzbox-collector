@@ -5,6 +5,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY fritzbox_collector.py .
+COPY weather_collector.py .
+COPY electricity_price.py .
 COPY notify.py .
 COPY healthcheck.py .
 
