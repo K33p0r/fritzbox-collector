@@ -6,6 +6,9 @@ from fritzconnection import FritzConnection
 import mysql.connector
 import speedtest
 from notify import notify_all
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from tibber_collector import get_tibber_consumption_data
 
 # Optional: spezifische Exceptions, falls verfügbar
 try:
@@ -72,6 +75,20 @@ def create_tables():
             ping_ms FLOAT,
             download_mbps FLOAT,
             upload_mbps FLOAT,
+            time DATETIME
+        )""",
+        """CREATE TABLE IF NOT EXISTS tibber_consumption (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            consumption_kwh FLOAT,
+            cost FLOAT,
+            unit_price FLOAT,
+            from_time DATETIME,
+            to_time DATETIME,
+            current_price_total FLOAT,
+            current_price_energy FLOAT,
+            current_price_tax FLOAT,
+            price_starts_at DATETIME,
+            real_time_enabled BOOLEAN,
             time DATETIME
         )"""
     ]
@@ -365,18 +382,100 @@ def write_speedtest_to_sql(result):
                 time.sleep(10)
         logger.error("Speedtest-Daten konnten nach 3 Versuchen nicht geschrieben werden.")
 
+def collect_and_store_tibber():
+    """Collect Tibber consumption data and store it in the database."""
+    logger.info("Sammle Tibber-Daten...")
+    tibber_data = get_tibber_consumption_data()
+    if tibber_data:
+        write_tibber_to_sql(tibber_data)
+
+def write_tibber_to_sql(data):
+    """Write Tibber consumption data to the database with retry logic."""
+    if not data:
+        logger.warning("Keine Tibber-Daten zum Speichern vorhanden.")
+        return
+    
+    logger.info("Schreibe Tibber-Daten in die Datenbank...")
+    for attempt in range(3):
+        try:
+            conn = mysql.connector.connect(**SQL_CONFIG)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO tibber_consumption (
+                    consumption_kwh, cost, unit_price, from_time, to_time,
+                    current_price_total, current_price_energy, current_price_tax,
+                    price_starts_at, real_time_enabled, time
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                """,
+                (
+                    data.get("consumption_kwh"),
+                    data.get("cost"),
+                    data.get("unit_price"),
+                    data.get("from_time"),
+                    data.get("to_time"),
+                    data.get("current_price_total"),
+                    data.get("current_price_energy"),
+                    data.get("current_price_tax"),
+                    data.get("price_starts_at"),
+                    data.get("real_time_enabled"),
+                )
+            )
+            cursor.close()
+            conn.close()
+            logger.info("Tibber-Daten erfolgreich gespeichert.")
+            return
+        except Exception as e:
+            logger.error(f"Fehler beim Schreiben Tibber-Daten in DB (Versuch {attempt+1}): {e}")
+            notify_all(f"Fehler beim Schreiben Tibber-Daten: {e}")
+            time.sleep(10)
+    logger.error("Tibber-Daten konnten nach 3 Versuchen nicht geschrieben werden.")
+
 if __name__ == "__main__":
     interval = int(os.getenv("COLLECT_INTERVAL", "300"))
     speedtest_interval = int(os.getenv("SPEEDTEST_INTERVAL", "3600"))
-    last_speedtest = 0
+    tibber_interval = int(os.getenv("TIBBER_INTERVAL", "300"))  # Default 5 minutes (300 seconds)
+    
     create_tables()
     logger.info("Starte FritzBox-Collector...")
+    
+    # Initialize APScheduler for Tibber collection
+    scheduler = BackgroundScheduler()
+    
+    # Schedule Tibber data collection every 5 minutes (or custom interval)
+    if os.getenv("TIBBER_API_TOKEN"):
+        scheduler.add_job(
+            collect_and_store_tibber,
+            trigger=IntervalTrigger(seconds=tibber_interval),
+            id='tibber_collector',
+            name='Collect Tibber consumption data',
+            replace_existing=True
+        )
+        logger.info(f"Tibber-Datensammlung geplant alle {tibber_interval} Sekunden.")
+    else:
+        logger.info("TIBBER_API_TOKEN nicht gesetzt, Tibber-Datensammlung übersprungen.")
+    
+    # Start the scheduler
+    scheduler.start()
+    
+    # Main loop for FritzBox and Speedtest data collection
+    last_speedtest = 0
     while True:
-        fritz_data = get_fritz_data()
-        write_to_sql(fritz_data)
-        now = time.time()
-        if now - last_speedtest > speedtest_interval:
-            speed_result = run_speedtest()
-            write_speedtest_to_sql(speed_result)
-            last_speedtest = now
-        time.sleep(interval)
+        try:
+            fritz_data = get_fritz_data()
+            write_to_sql(fritz_data)
+            now = time.time()
+            if now - last_speedtest > speedtest_interval:
+                speed_result = run_speedtest()
+                write_speedtest_to_sql(speed_result)
+                last_speedtest = now
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            logger.info("Beende FritzBox-Collector...")
+            scheduler.shutdown()
+            break
+        except Exception as e:
+            logger.error(f"Unerwarteter Fehler in der Hauptschleife: {e}")
+            notify_all(f"Kritischer Fehler in FritzBox-Collector: {e}")
+            time.sleep(60)  # Wait a bit before retrying
