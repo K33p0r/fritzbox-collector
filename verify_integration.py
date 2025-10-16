@@ -147,7 +147,7 @@ print("   ✓ All collectors configured correctly")
 
 # Configuration summary
 print("\n6. Configuration Summary:")
-print(f"   - Tibber API Token: {'Set (' + os.environ['TIBBER_API_TOKEN'][:20] + '...)' if os.environ.get('TIBBER_API_TOKEN') else 'Not set'}")
+print(f"   - Tibber API Token: {'Set' if os.environ.get('TIBBER_API_TOKEN') else 'Not set'}")
 print(f"   - Tibber Collection Interval: {os.environ.get('TIBBER_INTERVAL', '300')} seconds")
 print(f"   - FritzBox Collection Interval: {os.environ.get('COLLECT_INTERVAL', '300')} seconds")
 print(f"   - Speedtest Interval: {os.environ.get('SPEEDTEST_INTERVAL', '3600')} seconds")
