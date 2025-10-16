@@ -100,5 +100,11 @@ Der Wert kann über die Datenbanktabelle `electricity_price_config` angepasst we
 ## Healthcheck
 Der Healthcheck prüft, ob die Logdatei regelmäßig geschrieben wird.
 
+## Dokumentation
+
+- **[NEUE_FEATURES.md](NEUE_FEATURES.md)**: Ausführliche Anleitung für WeatherAPI und Strompreis-Features
+- **[GRAFANA_EXAMPLES.md](GRAFANA_EXAMPLES.md)**: Beispiel-Queries für Grafana-Dashboards
+- **[example_cost_queries.sql](example_cost_queries.sql)**: SQL-Beispiele für Stromkosten-Berechnungen
+
 ## Lizenz
 MIT
