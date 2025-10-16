@@ -2,10 +2,12 @@ import time
 import os
 import re
 import logging
+import threading
 from fritzconnection import FritzConnection
 import mysql.connector
 import speedtest
 from notify import notify_all
+from tibber_collector import create_tibber_table, sync_run_historical_collection
 
 # Optional: spezifische Exceptions, falls verfügbar
 try:
@@ -93,6 +95,14 @@ def create_tables():
     except Exception as e:
         logger.error(f"Fehler beim Ergänzen fehlender Spalten: {e}")
         notify_all(f"SQL Spalten konnten nicht ergänzt werden: {e}")
+    
+    # Create Tibber table if enabled
+    if os.getenv("TIBBER_TOKEN"):
+        try:
+            create_tibber_table()
+        except Exception as e:
+            logger.error(f"Fehler beim Erstellen der Tibber-Tabelle: {e}")
+            notify_all(f"Tibber-Tabelle konnte nicht angelegt werden: {e}")
 
 def ensure_columns():
     # Prüfe vorhandene Spalten und ergänze ggf. via ALTER TABLE
@@ -368,9 +378,17 @@ def write_speedtest_to_sql(result):
 if __name__ == "__main__":
     interval = int(os.getenv("COLLECT_INTERVAL", "300"))
     speedtest_interval = int(os.getenv("SPEEDTEST_INTERVAL", "3600"))
+    tibber_interval = int(os.getenv("TIBBER_INTERVAL", "3600"))  # Default: every hour
     last_speedtest = 0
+    last_tibber_collection = 0
     create_tables()
     logger.info("Starte FritzBox-Collector...")
+    
+    # Check if Tibber is enabled
+    tibber_enabled = bool(os.getenv("TIBBER_TOKEN"))
+    if tibber_enabled:
+        logger.info("Tibber integration enabled")
+    
     while True:
         fritz_data = get_fritz_data()
         write_to_sql(fritz_data)
@@ -379,4 +397,15 @@ if __name__ == "__main__":
             speed_result = run_speedtest()
             write_speedtest_to_sql(speed_result)
             last_speedtest = now
+        
+        # Collect Tibber data if enabled
+        if tibber_enabled and (now - last_tibber_collection > tibber_interval):
+            try:
+                logger.info("Collecting Tibber historical data...")
+                sync_run_historical_collection()
+                last_tibber_collection = now
+            except Exception as e:
+                logger.error(f"Error collecting Tibber data: {e}")
+                notify_all(f"Tibber collection error: {e}")
+        
         time.sleep(interval)
