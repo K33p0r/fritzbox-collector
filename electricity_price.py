@@ -43,7 +43,7 @@ def create_electricity_price_table():
         conn.close()
         logger.info("electricity_price_config Tabelle wurde geprüft/erstellt.")
     except Exception as e:
-        logger.error(f"Fehler bei electricity_price_config Tabellenprüfung/-erstellung: {e}")
+        logger.error("Fehler bei electricity_price_config Tabellenprüfung/-erstellung: %s", e)
         notify_all(f"Strompreis-Tabelle konnte nicht angelegt werden: {e}")
         raise
 
@@ -52,7 +52,7 @@ def store_electricity_price():
     """
     Speichert den aktuellen Strompreis in der Datenbank, falls noch kein aktiver Eintrag existiert.
     """
-    logger.info(f"Prüfe Strompreis-Konfiguration (aktuell: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh)...")
+    logger.info("Prüfe Strompreis-Konfiguration (aktuell: %s EUR/kWh)...", ELECTRICITY_PRICE_EUR_PER_KWH)
     
     try:
         conn = mysql.connector.connect(**SQL_CONFIG)
@@ -75,7 +75,7 @@ def store_electricity_price():
                 """,
                 (ELECTRICITY_PRICE_EUR_PER_KWH, "Statischer Strompreis (Standardkonfiguration)")
             )
-            logger.info(f"Strompreis {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh in Datenbank gespeichert.")
+            logger.info("Strompreis %s EUR/kWh in Datenbank gespeichert.", ELECTRICITY_PRICE_EUR_PER_KWH)
         else:
             logger.info("Aktiver Strompreis-Eintrag bereits vorhanden.")
         
@@ -83,7 +83,7 @@ def store_electricity_price():
         conn.close()
         
     except Exception as e:
-        logger.error(f"Fehler beim Speichern des Strompreises: {e}")
+        logger.error("Fehler beim Speichern des Strompreises: %s", e)
         notify_all(f"Fehler beim Speichern des Strompreises: {e}")
 
 
@@ -112,14 +112,14 @@ def get_current_electricity_price():
         
         if result:
             price = result[0]
-            logger.debug(f"Strompreis aus Datenbank gelesen: {price} EUR/kWh")
+            logger.debug("Strompreis aus Datenbank gelesen: %s EUR/kWh", price)
             return price
         else:
-            logger.debug(f"Kein Strompreis in DB - verwende Konstante: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh")
+            logger.debug("Kein Strompreis in DB - verwende Konstante: %s EUR/kWh", ELECTRICITY_PRICE_EUR_PER_KWH)
             return ELECTRICITY_PRICE_EUR_PER_KWH
             
     except Exception as e:
-        logger.warning(f"Fehler beim Lesen des Strompreises aus DB: {e} - verwende Konstante")
+        logger.warning("Fehler beim Lesen des Strompreises aus DB: %s - verwende Konstante", e)
         return ELECTRICITY_PRICE_EUR_PER_KWH
 
 

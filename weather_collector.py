@@ -51,7 +51,7 @@ def create_weather_table():
         conn.close()
         logger.info("weather_data Tabelle wurde geprüft/erstellt.")
     except Exception as e:
-        logger.error(f"Fehler bei weather_data Tabellenprüfung/-erstellung: {e}")
+        logger.error("Fehler bei weather_data Tabellenprüfung/-erstellung: %s", e)
         notify_all(f"Weather-Tabelle konnte nicht angelegt werden: {e}")
         raise
 
@@ -67,7 +67,7 @@ def fetch_weather_data():
         logger.warning("WEATHER_API_KEY ist nicht gesetzt - überspringe Wetterabfrage")
         return None
     
-    logger.info(f"Frage Wetterdaten ab für: {WEATHER_LOCATION}")
+    logger.info("Frage Wetterdaten ab für: %s", WEATHER_LOCATION)
     
     try:
         params = {
@@ -95,19 +95,20 @@ def fetch_weather_data():
         }
         
         logger.info(
-            f"Wetterdaten abgerufen: Temp={weather_data['temperature_celsius']}°C, "
-            f"Luftfeuchtigkeit={weather_data['humidity']}%, "
-            f"Wetter={weather_data['weather_description']}"
+            "Wetterdaten abgerufen: Temp=%s°C, Luftfeuchtigkeit=%s%%, Wetter=%s",
+            weather_data['temperature_celsius'],
+            weather_data['humidity'],
+            weather_data['weather_description']
         )
         
         return weather_data
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Fehler beim Abrufen der Wetterdaten: {e}")
+        logger.error("Fehler beim Abrufen der Wetterdaten: %s", e)
         notify_all(f"Fehler beim Abrufen der Wetterdaten: {e}")
         return None
     except KeyError as e:
-        logger.error(f"Fehler beim Parsen der Wetterdaten: {e}")
+        logger.error("Fehler beim Parsen der Wetterdaten: %s", e)
         notify_all(f"Fehler beim Parsen der Wetterdaten: {e}")
         return None
 
@@ -154,7 +155,7 @@ def write_weather_to_sql(weather_data):
             logger.info("Wetterdaten erfolgreich gespeichert.")
             return
         except Exception as e:
-            logger.error(f"Fehler beim Schreiben der Wetterdaten in DB (Versuch {attempt+1}): {e}")
+            logger.error("Fehler beim Schreiben der Wetterdaten in DB (Versuch %s): %s", attempt+1, e)
             notify_all(f"Fehler beim Schreiben der Wetterdaten: {e}")
             import time
             time.sleep(10)

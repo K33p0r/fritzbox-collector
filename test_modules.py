@@ -24,10 +24,7 @@ print("=" * 60)
 print("\n[Test 1] Importing modules...")
 try:
     from weather_collector import (
-        create_weather_table,
         fetch_weather_data,
-        write_weather_to_sql,
-        collect_weather,
         WEATHER_API_KEY,
         WEATHER_LOCATION
     )
@@ -40,9 +37,6 @@ except Exception as e:
 
 try:
     from electricity_price import (
-        create_electricity_price_table,
-        store_electricity_price,
-        get_current_electricity_price,
         calculate_energy_cost,
         calculate_power_cost_per_interval,
         ELECTRICITY_PRICE_EUR_PER_KWH
