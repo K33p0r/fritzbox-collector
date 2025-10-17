@@ -173,8 +173,8 @@ Average: 9.28/10 ✓ Excellent
 3. Add documentation clarifying legacy status
 
 ### Lines Changed
-- Added: ~326 lines (documentation + module docstring)
-- Modified: 4 lines (bug fixes)
+- Added: ~580 lines (documentation files + module docstring)
+- Modified: 4 lines (bug fixes in fritzbox_aha_collector.py)
 - Deleted: 0 lines
 
 ---
@@ -205,7 +205,7 @@ The FritzBox Collector is now production-ready with all critical issues resolved
 
 ## Recommendations for Deployment
 
-1. **Use Production File:** Use `fritzbox_collector.py` for production deployments (not the legacy `fritzbox_aha_collector.py`)
+1. **Use Production File:** Use `fritzbox_collector.py` for production deployments (not the legacy `fritzbox_aha_collector.py`). The legacy file uses dummy authentication and lacks proper error handling, making it unsuitable for production use.
 
 2. **Environment Variables:** Ensure all required environment variables are set:
    - FRITZBOX_HOST
