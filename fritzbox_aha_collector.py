@@ -1,3 +1,10 @@
+"""
+Legacy/Example FritzBox AHA Collector
+
+NOTE: This is an example implementation with simplified authentication.
+For production use, please use fritzbox_collector.py which implements
+proper authentication using the FritzConnection library.
+"""
 import requests
 import time
 import mysql.connector

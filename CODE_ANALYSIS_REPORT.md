@@ -63,8 +63,8 @@ All files have been analyzed for syntax errors, logical issues, and variable usa
    - **Fix:** Removed assignment since response wasn't used
 
 3. ❌ **Incorrect URL construction** (Line 25, 31)
-   - **Impact:** URLs would be malformed (e.g., "http://http://192.168.178.1:49000/...")
-   - **Fix:** Removed redundant "http://" prefix since FRITZBOX_URL already contains it
+   - **Impact:** URLs would be malformed (e.g., "http://http://192.168.178.1:49000/...") since FRITZBOX_URL constant at line 6 already includes the protocol
+   - **Fix:** Removed redundant "http://" prefix from f-string since FRITZBOX_URL already contains "http://"
 
 **Changes Made:**
 ```python
@@ -77,7 +77,10 @@ url = f"{FRITZBOX_URL}/webservices/homeautoswitch.lua"
 resp = requests.get(url, params=params, timeout=10)
 ```
 
-**Note:** This file appears to be a legacy/example implementation. The main project uses `fritzbox_collector.py` which properly implements the FritzConnection library.
+**Additional Notes:**
+- This file appears to be a legacy/example implementation. The main project uses `fritzbox_collector.py` which properly implements the FritzConnection library.
+- The `get_sid()` function returns a hardcoded dummy SID ("0000000000000000") and does not implement proper authentication. This is acceptable for an example file, but would need proper Challenge-Response implementation for production use.
+- For production deployments, use `fritzbox_collector.py` instead, which uses the FritzConnection library with proper authentication.
 
 ---
 
