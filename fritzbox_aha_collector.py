@@ -23,13 +23,13 @@ def aha_request(cmd, ain=None):
     if ain:
         params['ain'] = ain
     url = f"http://{FRITZBOX_URL}/webservices/homeautoswitch.lua"
-    resp = requests.get(url, params=params)
+    resp = requests.get(url, params=params, timeout=10)
     return resp.text
 
 def get_sid():
     # Session-ID holen (Login)
     url = f"http://{FRITZBOX_URL}/login_sid.lua"
-    resp = requests.get(url)
+    requests.get(url, timeout=10)
     # Hier müsste das Challenge-Response-Verfahren implementiert werden!
     # Alternativ, wenn du kein User-Passwort hast, einfach sid auslesen.
     # Für produktives Skript siehe z.B. fritzconnection!

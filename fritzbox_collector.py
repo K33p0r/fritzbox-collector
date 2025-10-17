@@ -90,14 +90,14 @@ def create_tables():
         conn.close()
         logger.info("Tabellen wurden geprüft/erstellt.")
     except Exception as e:
-        logger.error(f"Fehler bei Tabellenprüfung/-erstellung: {e}")
+        logger.error("Fehler bei Tabellenprüfung/-erstellung: %s", e)
         notify_all(f"SQL Tabellen konnten nicht angelegt werden: {e}")
 
     # Nachträglich fehlende Spalten ergänzen (Migration)
     try:
         ensure_columns()
     except Exception as e:
-        logger.error(f"Fehler beim Ergänzen fehlender Spalten: {e}")
+        logger.error("Fehler beim Ergänzen fehlender Spalten: %s", e)
         notify_all(f"SQL Spalten konnten nicht ergänzt werden: {e}")
     
     # Wetter- und Strompreis-Tabellen erstellen
@@ -105,9 +105,9 @@ def create_tables():
         create_weather_table()
         create_electricity_price_table()
         store_electricity_price()
-        logger.info(f"Strompreis konfiguriert: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh")
+        logger.info("Strompreis konfiguriert: %s EUR/kWh", ELECTRICITY_PRICE_EUR_PER_KWH)
     except Exception as e:
-        logger.error(f"Fehler beim Erstellen zusätzlicher Tabellen: {e}")
+        logger.error("Fehler beim Erstellen zusätzlicher Tabellen: %s", e)
         notify_all(f"Zusätzliche Tabellen konnten nicht angelegt werden: {e}")
 
 def ensure_columns():
@@ -134,7 +134,7 @@ def ensure_columns():
         if col not in existing:
             alter = f"ALTER TABLE dect200_data ADD COLUMN {col} {coltype} NULL"
             cursor.execute(alter)
-            logger.info(f"Spalte ergänzt: {col} {coltype}")
+            logger.info("Spalte ergänzt: %s %s", col, coltype)
     cursor.close()
     conn.close()
 
@@ -145,7 +145,7 @@ def _resolve_homeauto_service(fc: FritzConnection) -> str | None:
             if name.startswith("X_AVM-DE_Homeauto"):
                 return name
     except Exception as e:
-        logger.error(f"Homeauto-Service konnte nicht ermittelt werden: {e}")
+        logger.error("Homeauto-Service konnte nicht ermittelt werden: %s", e)
     return None
 
 def _is_index_out_of_range_error(err: Exception) -> bool:
@@ -161,9 +161,9 @@ def _enumerate_homeauto_devices(fc: FritzConnection, service_name: str, max_iter
             devices.append(info)
         except Exception as e:
             if _is_index_out_of_range_error(e):
-                logger.info(f"Geräte-Auflistung beendet bei Index {i} (713).")
+                logger.info("Geräte-Auflistung beendet bei Index %s (713).", i)
                 break
-            logger.error(f"GetGenericDeviceInfos Fehler bei Index {i}: {e}")
+            logger.error("GetGenericDeviceInfos Fehler bei Index %s: %s", i, e)
             notify_all(f"Fehler bei GetGenericDeviceInfos Index {i}: {e}")
             break
     return devices
@@ -237,14 +237,14 @@ def get_fritz_data():
     try:
         data["online"] = fc.call_action("WANIPConnection", "GetStatusInfo")["NewConnectionStatus"]
         data["external_ip"] = fc.call_action("WANIPConnection", "GetExternalIPAddress")["NewExternalIPAddress"]
-        logger.info(f"Online-Status (Cable): {data['online']}, Externe IP: {data['external_ip']}")
+        logger.info("Online-Status (Cable): %s, Externe IP: %s", data['online'], data['external_ip'])
     except Exception as e:
         try:
             data["online"] = fc.call_action("WANPPPConnection", "GetStatus")["NewConnectionStatus"]
             data["external_ip"] = fc.call_action("WANPPPConnection", "GetExternalIPAddress")["NewExternalIPAddress"]
-            logger.info(f"Online-Status (DSL): {data['online']}, Externe IP: {data['external_ip']}")
+            logger.info("Online-Status (DSL): %s, Externe IP: %s", data['online'], data['external_ip'])
         except Exception as e2:
-            logger.error(f"Fehler beim Abfragen FritzBox-Status (beide Methoden): Cable: {e}, DSL: {e2}")
+            logger.error("Fehler beim Abfragen FritzBox-Status (beide Methoden): Cable: %s, DSL: %s", e, e2)
             notify_all(f"Fehler beim Abfragen FritzBox-Status: {e2}")
             data["online"] = None
             data["external_ip"] = None
@@ -252,9 +252,9 @@ def get_fritz_data():
     # Aktive Geräte (LAN/WLAN)
     try:
         data["active_devices"] = fc.call_action("Hosts", "GetHostNumberOfEntries")["NewHostNumberOfEntries"]
-        logger.info(f"Aktive Geräte: {data['active_devices']}")
+        logger.info("Aktive Geräte: %s", data['active_devices'])
     except Exception as e:
-        logger.error(f"Fehler beim Abfragen der Geräteanzahl: {e}")
+        logger.error("Fehler beim Abfragen der Geräteanzahl: %s", e)
         notify_all(f"Fehler beim Abfragen Geräteanzahl: {e}")
         data["active_devices"] = None
 
@@ -282,11 +282,9 @@ def get_fritz_data():
     # Logging
     for d in normalized:
         logger.info(
-            f"DECT {d['ain']}: "
-            f"State={d['state']}({d['switch_state']}), "
-            f"Power(mW)={d['multimeter_power']}, "
-            f"Temp(0.1C)={d['temperature_celsius']}, "
-            f"Prod='{d['product_name']}', Name='{d['device_name']}'"
+            "DECT %s: State=%s(%s), Power(mW)=%s, Temp(0.1C)=%s, Prod='%s', Name='%s'",
+            d['ain'], d['state'], d['switch_state'], d['multimeter_power'],
+            d['temperature_celsius'], d['product_name'], d['device_name']
         )
 
     data["dect"] = normalized
@@ -335,7 +333,7 @@ def write_to_sql(data):
             logger.info("FritzBox- und DECT-Daten erfolgreich gespeichert.")
             return
         except Exception as e:
-            logger.error(f"Fehler beim Schreiben in die Datenbank (Versuch {attempt+1}): {e}")
+            logger.error("Fehler beim Schreiben in die Datenbank (Versuch %s): %s", attempt+1, e)
             notify_all(f"Fehler beim Schreiben FritzBox-Daten: {e}")
             time.sleep(10)
     logger.error("Daten konnten nach 3 Versuchen nicht geschrieben werden.")
@@ -349,10 +347,10 @@ def run_speedtest():
             download = st.download() / 1_000_000
             upload = st.upload() / 1_000_000
             ping = st.results.ping
-            logger.info(f"Speedtest: Ping={ping} ms, Download={download:.2f} Mbps, Upload={upload:.2f} Mbps")
+            logger.info("Speedtest: Ping=%s ms, Download=%.2f Mbps, Upload=%.2f Mbps", ping, download, upload)
             return {"ping_ms": ping, "download_mbps": download, "upload_mbps": upload}
         except Exception as e:
-            logger.error(f"Speedtest Fehler (Versuch {attempt+1}): {e}")
+            logger.error("Speedtest Fehler (Versuch %s): %s", attempt+1, e)
             notify_all(f"Fehler beim Speedtest: {e}")
             time.sleep(10)
     return None
@@ -376,7 +374,7 @@ def write_speedtest_to_sql(result):
                 logger.info("Speedtest-Daten erfolgreich gespeichert.")
                 return
             except Exception as e:
-                logger.error(f"Fehler beim Schreiben Speedtest in DB (Versuch {attempt+1}): {e}")
+                logger.error("Fehler beim Schreiben Speedtest in DB (Versuch %s): %s", attempt+1, e)
                 notify_all(f"Fehler beim Schreiben Speedtest-Daten: {e}")
                 time.sleep(10)
         logger.error("Speedtest-Daten konnten nach 3 Versuchen nicht geschrieben werden.")
@@ -389,7 +387,7 @@ if __name__ == "__main__":
     last_weather = 0
     create_tables()
     logger.info("Starte FritzBox-Collector...")
-    logger.info(f"Strompreis: {ELECTRICITY_PRICE_EUR_PER_KWH} EUR/kWh")
+    logger.info("Strompreis: %s EUR/kWh", ELECTRICITY_PRICE_EUR_PER_KWH)
     while True:
         fritz_data = get_fritz_data()
         write_to_sql(fritz_data)
